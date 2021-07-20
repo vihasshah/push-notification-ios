@@ -283,14 +283,37 @@ RCT_EXPORT_METHOD(scheduleLocalNotification:(UILocalNotification *)notification)
 
 RCT_EXPORT_METHOD(addNotificationRequest:(UNNotificationRequest*)request)
 {
-    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-    [center addNotificationRequest:request
-                withCompletionHandler:^(NSError* _Nullable error) {
-        if (!error) {
-            NSLog(@"notifier request success");
+      NSString *imageUrl = request.content.userInfo[@"image"];
+      NSMutableDictionary *fcmInfo = request.content.userInfo[@"fcm_options"];
+      if(fcmInfo != nil && fcmInfo[@"image"] != nil) {
+          imageUrl = fcmInfo[@"image"];
+      }
+      if(imageUrl != nil) {
+          [self loadAttachmentForUrlString:imageUrl completionHandler:^(UNNotificationAttachment *attachment) {
+              if (attachment) {
+                  UNMutableNotificationContent *bestAttemptRequest = [request.content mutableCopy];
+                  [bestAttemptRequest setAttachments: [NSArray arrayWithObject:attachment]];
+                  UNNotificationRequest* notification = [UNNotificationRequest requestWithIdentifier:request.identifier content:bestAttemptRequest trigger:request.trigger];
+                  UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+                  [center addNotificationRequest:notification
+                              withCompletionHandler:^(NSError* _Nullable error) {
+                      if (!error) {
+                          NSLog(@"image notifier request success");
+                          }
+                      }
+                  ];
+              }
+          }];
+      } else {
+        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        [center addNotificationRequest:request
+                    withCompletionHandler:^(NSError* _Nullable error) {
+            if (!error) {
+                NSLog(@"notifier request success");
+                }
             }
-        }
-    ];
+        ];
+      }
 }
 
 RCT_EXPORT_METHOD(setNotificationCategories:(NSArray*)categories)
@@ -435,6 +458,29 @@ RCT_EXPORT_METHOD(getDeliveredNotifications:(RCTResponseSenderBlock)callback)
   }
 }
 
+- (void)loadAttachmentForUrlString:(NSString *)urlString completionHandler:(void(^)(UNNotificationAttachment *))completionHandler  {
+    __block UNNotificationAttachment *attachment = nil;
+    NSURL *attachmentURL = [NSURL URLWithString:urlString];
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
+    [[session downloadTaskWithURL:attachmentURL
+                    completionHandler:^(NSURL *temporaryFileLocation, NSURLResponse *response, NSError *error) {
+                        if (error != nil) {
+                            NSLog(@"%@", error.localizedDescription);
+                        } else {
+                            NSFileManager *fileManager = [NSFileManager defaultManager];
+                            NSURL *localURL = [NSURL fileURLWithPath:[temporaryFileLocation.path stringByAppendingString:@".png"]];
+                            [fileManager moveItemAtURL:temporaryFileLocation toURL:localURL error:&error];
+
+                            NSError *attachmentError = nil;
+                            attachment = [UNNotificationAttachment attachmentWithIdentifier:@"" URL:localURL options:nil error:&attachmentError];
+                            if (attachmentError) {
+                            NSLog(@"%@", attachmentError.localizedDescription);
+                            }
+                        }
+                        completionHandler(attachment);
+                    }] resume];
+
+}
 #else //TARGET_OS_TV
 
 RCT_EXPORT_METHOD(onFinishRemoteNotification:(NSString *)notificationId fetchResult:(NSString *)fetchResult)
